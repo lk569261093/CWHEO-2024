@@ -1,0 +1,288 @@
+该脚本的主要目标是通过光谱特征预测环境监测中的含盐量（含盐量(g/kg)），使用互信息法进行特征选择，并结合随机森林（Random Forest）、支持向量回归（SVR）作为基础模型，岭回归（Ridge）作为元模型，构建堆叠回归器（Stacking Regressor）进行预测。整个过程包括数据读取、特征选择、数据预处理、模型训练与保存、预测、评估以及结果可视化。
+有机质最优模型与之类似
+1. 导入必要的库
+
+
+import pandas as pd
+import numpy as np
+from sklearn.feature_selection import mutual_info_regression
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor, StackingRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+import joblib
+解释：
+Pandas & NumPy： 用于数据处理和数值计算。
+Scikit-learn (sklearn)： 提供特征选择、模型训练、数据分割、标准化、回归模型、堆叠回归器以及评估指标等功能。
+Scipy： linregress 用于线性回归分析。
+Matplotlib： 用于数据可视化。
+Joblib： 用于模型的保存和加载。
+2. 读取Excel数据文件
+
+
+# 读取Excel文件
+file_path = '2.含盐量光谱特征25.xlsx'
+data = pd.read_excel(file_path)
+解释：
+从路径 '2.含盐量光谱特征25.xlsx' 读取Excel文件，并将其存储为Pandas的DataFrame data。该文件包含光谱特征和对应的土壤含盐量数据。
+3. 提取特征与目标变量
+
+        
+
+# 提取土壤养分数据和光谱数据
+y = data['含盐量(g/kg)']
+X = data.drop(columns=['含盐量(g/kg)'])
+解释：
+y： 目标变量，表示土壤含盐量（含盐量(g/kg)）。
+X： 特征矩阵，包含所有其他列（假定为光谱特征），通过删除目标列得到。
+4. 使用互信息法进行特征选择
+
+        
+
+# 互信息法选择特征
+mi = mutual_info_regression(X, y, random_state=42)
+mi_series = pd.Series(mi, index=X.columns, name='互信息值')
+mi_series.to_excel('互信息值.xlsx', index=True)
+    
+selected_features_mi = X.columns[mi > 0.2]
+X_selected_mi = X[selected_features_mi]
+解释：
+互信息回归 (mutual_info_regression)： 测量 X 中每个特征与目标变量 y 之间的依赖性。设置 random_state=42 确保结果可重复。
+存储互信息值： 创建一个Pandas Series mi_series，将互信息值与特征名对应，并保存为Excel文件 '互信息值.xlsx'，便于后续查看。
+特征选择阈值： 选择互信息值大于 0.2 的特征，存储在 selected_features_mi 中。
+X_selected_mi： 包含通过互信息法选择的特征的特征矩阵。
+备注： 互信息能够捕捉特征与目标变量之间的非线性关系，适用于回归任务中的特征选择。
+
+5. 数据预处理（标准化）
+
+        
+
+# 数据预处理
+scaler_X = StandardScaler()
+scaler_y = StandardScaler()
+X_scaled_mi = scaler_X.fit_transform(X_selected_mi)
+y_scaled = scaler_y.fit_transform(y.values.reshape(-1, 1)).flatten()
+    
+# 保存用于标准化的 scaler_y 对象
+joblib.dump(scaler_y, 'scaler_y.pkl')
+解释：
+标准化： 将特征和目标变量进行标准化处理，移除均值并缩放到单位方差。
+scaler_X： 用于标准化特征矩阵。
+scaler_y： 用于标准化目标变量。
+X_scaled_mi： 通过互信息法选择的特征矩阵进行标准化后的数据。
+y_scaled： 标准化后的目标变量。使用 reshape(-1, 1) 将一维数组转换为二维数组，以符合 StandardScaler 的输入要求，然后通过 flatten() 转回一维数组。
+保存标准化对象： 使用 joblib.dump 将 scaler_y 保存为 'scaler_y.pkl'，以便后续在新数据上进行逆标准化处理。
+备注： 标准化对于一些对特征尺度敏感的模型（如岭回归、支持向量机）至关重要。
+
+6. 分割数据集为训练集和测试集
+
+
+# 分割数据集
+X_train_mi, X_test_mi, y_train, y_test = train_test_split(X_scaled_mi, y_scaled, test_size=0.2, random_state=42)
+解释：
+train_test_split： 将数据集分割为训练集和测试集。
+test_size=0.2： 保留20%的数据用于测试，80%用于训练。
+random_state=42： 确保分割的可重现性。
+结果：
+X_train_mi & X_test_mi： 训练集和测试集的特征数据，通过互信息法选择的特征。
+y_train & y_test： 训练集和测试集的目标变量。
+7. 定义并训练基础模型
+
+
+# 定义和训练基础模型
+rf = RandomForestRegressor(max_depth=10, n_estimators=100, random_state=42)     #100 0.8644 0.6184   #10 0.8644 0.6184
+svr = SVR(C=40, epsilon=0.01)   #40 0.8644 0.6184
+    
+rf.fit(X_train_mi, y_train)
+svr.fit(X_train_mi, y_train)
+解释：
+随机森林回归器 (RandomForestRegressor)：
+参数设置：
+max_depth=10： 树的最大深度，防止过拟合。
+n_estimators=100： 森林中树的数量。
+random_state=42： 确保结果可重复。
+训练模型： 使用训练集 X_train_mi 和 y_train 进行训练。
+支持向量回归 (SVR)：
+参数设置：
+C=40： 惩罚参数，控制模型对误差的惩罚程度，值越大表示对误差的惩罚越强。
+epsilon=0.01： 控制模型的精度，决定了在回归过程中允许的误差范围。
+训练模型： 使用训练集 X_train_mi 和 y_train 进行训练。
+备注：
+这些基础模型将作为堆叠回归器（Stacking Regressor）的基学习器（base learners）。
+参数值（如 max_depth=10、n_estimators=100、C=40、epsilon=0.01）可能是通过先前的实验或调优得到的最佳值。
+8. 定义元模型
+
+
+# 定义元模型
+meta_model = Ridge(alpha=6) #50 0.8782 0.6830 0.3350 0.15
+解释：
+岭回归 (Ridge)： 作为堆叠回归器的元模型（meta model）。
+参数设置：
+alpha=6： 正则化强度，控制模型复杂度，防止过拟合。
+备注： 元模型用于综合基础模型的预测结果，以提升整体回归性能。
+9. 创建堆叠回归器
+
+
+# 创建堆叠回归器
+stacking_regressor = StackingRegressor(
+    estimators=[('rf', rf), ('svr', svr)],
+    final_estimator=meta_model,
+    cv=5
+)
+解释：
+StackingRegressor： 创建一个堆叠回归器，将多个基础回归模型的预测结果作为输入，训练一个元模型进行最终预测。
+estimators： 基础模型列表，这里包括：
+'rf'： 随机森林回归器。
+'svr'： 支持向量回归。
+final_estimator： 元模型，这里使用岭回归。
+cv=5： 在进行堆叠时使用5折交叉验证，确保基础模型的泛化能力。
+备注： 堆叠回归器通过结合多个模型的优势，通常能够提升预测性能。
+
+10. 训练堆叠回归器
+
+        
+
+# 训练堆叠模型
+stacking_regressor.fit(X_train_mi, y_train)
+解释：
+在训练集 X_train_mi 和 y_train 上训练堆叠回归器。这包括：
+基础模型训练： 随机森林和SVR在不同的训练子集上进行训练。
+元模型训练： 使用基础模型的交叉验证预测结果作为输入，训练岭回归模型。
+11. 保存训练好的模型
+
+        
+
+# 保存模型
+joblib.dump(stacking_regressor, '环境监测含盐量最优模型.pkl')
+解释：
+使用 joblib.dump 将训练好的堆叠回归模型保存为 '环境监测含盐量最优模型.pkl'。这便于后续在生产环境中加载和使用该模型进行预测，而无需重新训练。
+12. 进行预测
+
+        
+
+# 预测
+y_train_pred_stacking = stacking_regressor.predict(X_train_mi)
+y_test_pred_stacking = stacking_regressor.predict(X_test_mi)
+解释：
+训练集预测： 使用训练集 X_train_mi 进行预测，得到 y_train_pred_stacking。
+测试集预测： 使用测试集 X_test_mi 进行预测，得到 y_test_pred_stacking。
+备注： 这里的预测结果仍然处于标准化后的状态（因为目标变量 y 被标准化过）。
+
+13. 评估模型
+
+        
+
+# 评估模型
+def evaluate_model(y_true, y_pred):
+    slope, intercept, r_value, p_value, std_err = linregress(y_true, y_pred)
+    r2 = r_value**2
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    return r2, rmse, mae
+解释：
+定义评估函数 evaluate_model： 计算R²、均方根误差（RMSE）和平均绝对误差（MAE）。
+linregress： 进行线性回归分析，获取斜率、截距以及相关系数 r_value。
+r2： 相关系数的平方，表示模型的解释能力。
+rmse： 均方根误差，衡量预测值与实际值的偏差。
+mae： 平均绝对误差，衡量预测值与实际值的绝对偏差。
+14. 评估堆叠回归模型
+
+        
+
+# 评估堆叠模型
+train_r2_stacking, train_rmse_stacking, train_mae_stacking = evaluate_model(y_train, y_train_pred_stacking)
+test_r2_stacking, test_rmse_stacking, test_mae_stacking = evaluate_model(y_test, y_test_pred_stacking)
+    
+print(f'Training R2 (Stacking): {train_r2_stacking:.4f}, RMSE: {train_rmse_stacking:.4f}, MAE: {train_mae_stacking:.4f}')
+print(f'Testing R2 (Stacking): {test_r2_stacking:.4f}, RMSE: {test_rmse_stacking:.4f}, MAE: {test_mae_stacking:.4f}')
+解释：
+训练集评估： 计算并存储训练集的R²、RMSE和MAE。
+测试集评估： 计算并存储测试集的R²、RMSE和MAE。
+打印结果： 将训练集和测试集的评估指标打印出来，便于快速了解模型性能。
+示例输出解释：
+
+
+Training R2 (Stacking): 0.XXXX, RMSE: 0.XXXX, MAE: 0.XXXX
+Testing R2 (Stacking): 0.XXXX, RMSE: 0.XXXX, MAE: 0.XXXX
+R²： 越接近1表示模型越好地解释了数据的变异性。
+RMSE 和 MAE： 越小表示模型的预测误差越低。
+15. 逆标准化处理
+
+        
+
+# 逆标准化处理
+y_train_inv = scaler_y.inverse_transform(y_train.reshape(-1, 1)).flatten()
+y_test_inv = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
+y_train_pred_stacking_inv = scaler_y.inverse_transform(y_train_pred_stacking.reshape(-1, 1)).flatten()
+y_test_pred_stacking_inv = scaler_y.inverse_transform(y_test_pred_stacking.reshape(-1, 1)).flatten()
+解释：
+逆标准化： 将标准化后的目标变量和预测结果转换回原始尺度。
+y_train_inv & y_test_inv： 训练集和测试集的实际值逆标准化后的结果。
+y_train_pred_stacking_inv & y_test_pred_stacking_inv： 训练集和测试集的预测值逆标准化后的结果。
+步骤说明：
+reshape(-1, 1)： 将一维数组转换为二维数组，以符合 inverse_transform 的输入要求。
+flatten()： 将二维数组转换回一维数组。
+备注： 逆标准化后的结果更加直观，便于与实际值进行比较和解释。
+
+16. 保存结果到Excel文件
+
+ 
+# 保存结果到Excel文件
+train_results = {
+    'Actual Train': y_train_inv,
+    'Predicted Train (Stacking)': y_train_pred_stacking_inv
+}
+    
+train_results_df = pd.DataFrame(train_results)
+train_results_df.to_excel('训练集实际值和预测值.xlsx', index=False)
+    
+test_results = {
+    'Actual Test': y_test_inv,
+    'Predicted Test (Stacking)': y_test_pred_stacking_inv
+}
+    
+test_results_df = pd.DataFrame(test_results)
+test_results_df.to_excel('测试集实际值和预测值.xlsx', index=False)
+解释：
+创建结果字典：
+train_results： 包含训练集的实际值和模型预测值。
+test_results： 包含测试集的实际值和模型预测值。
+转换为DataFrame： 使用 pd.DataFrame 将字典转换为DataFrame格式。
+保存为Excel文件：
+训练集： 保存为 '训练集实际值和预测值.xlsx'，不包含索引。
+测试集： 保存为 '测试集实际值和预测值.xlsx'，不包含索引。
+备注： 这样可以方便地在Excel中查看和比较实际值与预测值。
+
+17. 可视化结果
+
+        
+
+# 可视化结果
+plt.figure(figsize=(10, 5))
+plt.plot(y_train_inv, label='Actual Train')
+plt.plot(y_train_pred_stacking_inv, label='Predicted Train (Stacking)')
+plt.legend()
+plt.title('Training Set: Actual vs Predicted (Stacking)')
+plt.show()
+    
+plt.figure(figsize=(10, 5))
+plt.plot(y_test_inv, label='Actual Test')
+plt.plot(y_test_pred_stacking_inv, label='Predicted Test (Stacking)')
+plt.legend()
+plt.title('Test Set: Actual vs Predicted (Stacking)')
+plt.show()
+解释：
+训练集可视化：
+创建一个图形，尺寸为10x5英寸。
+绘制训练集的实际值 (Actual Train) 和预测值 (Predicted Train (Stacking))。
+添加图例和标题。
+显示图形。
+测试集可视化：
+类似地，绘制测试集的实际值和预测值。
+添加图例和标题。
+显示图形。
+备注： 通过可视化可以直观地比较模型在训练集和测试集上的预测效果，观察预测值与实际值的匹配程度。

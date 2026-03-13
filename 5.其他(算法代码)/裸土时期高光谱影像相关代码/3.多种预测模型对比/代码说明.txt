@@ -1,0 +1,766 @@
+以下内容是关于 有机质多种预测模型对比代码的详细说明，含盐量多种预测模型对比代码与之类似。
+1. 导入必要的库
+
+
+import pandas as pd
+import numpy as np
+from sklearn.feature_selection import mutual_info_regression, RFE
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import Ridge, LinearRegression
+from sklearn.decomposition import PCA
+from sklearn.cross_decomposition import PLSRegression
+from sklearn.svm import SVR
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+解释：
+Pandas & NumPy： 用于数据处理和数值计算。
+Scikit-learn (sklearn)： 包含特征选择、模型训练、超参数调优、数据标准化、降维和评估等工具。
+Scipy： 特别是 linregress 用于线性回归分析。
+Matplotlib： 用于数据可视化。
+2. 读取Excel数据文件
+
+        
+
+# 读取Excel文件
+file_path = '2.有机质光谱特征25.xlsx'
+data = pd.read_excel(file_path)
+解释：
+从路径 '2.有机质光谱特征25.xlsx' 读取Excel文件，并将其存储为Pandas的DataFrame data。该文件包含光谱特征和对应的土壤有机质含量数据。
+3. 提取特征与目标变量
+
+        
+
+# 提取土壤养分数据和光谱数据
+y = data['有机质(g/kg)']
+X = data.drop(columns=['有机质(g/kg)'])
+解释：
+y： 目标变量，表示土壤有机质含量（有机质(g/kg)）。
+X： 特征矩阵，包含所有其他列（假定为光谱特征），通过删除目标列得到。
+4. 使用互信息法进行特征选择
+
+
+# 互信息法选择特征
+mi = mutual_info_regression(X, y)
+mi_series = pd.Series(mi, index=X.columns, name='互信息值')
+mi_series.to_excel('互信息值.xlsx', index=True)
+
+selected_features_mi = X.columns[mi > 0.3]
+X_selected_mi = X[selected_features_mi]
+解释：
+互信息回归 (mutual_info_regression)： 测量 X 中每个特征与目标变量 y 之间的依赖性。
+存储互信息值： 创建一个Pandas Series mi_series，将互信息值与特征名对应，并保存为Excel文件 '互信息值.xlsx'，便于后续查看。
+特征选择阈值： 选择互信息值大于 0.3 的特征，存储在 selected_features_mi 中。
+X_selected_mi： 包含通过互信息法选择的特征的特征矩阵。
+备注： 互信息能够捕捉特征与目标变量之间的非线性关系，适用于回归任务中的特征选择。
+
+5. 使用递归特征消除法（RFE）进行特征选择
+
+        
+
+# 递归特征消除法选择特征
+ridge_for_rfe = Ridge()
+rfe = RFE(estimator=ridge_for_rfe, n_features_to_select=10)
+rfe.fit(X, y)
+selected_features_rfe = X.columns[rfe.support_]
+X_selected_rfe = X[selected_features_rfe]
+解释：
+岭回归估计器： 使用岭回归 (Ridge()) 作为RFE的基估计器。
+递归特征消除法 (RFE)： 逐步消除不重要的特征，通过迭代方式减少特征数量。
+n_features_to_select=10： 指定RFE选择前10个最重要的特征。
+训练RFE： 在整个数据集 X 和 y 上拟合RFE。
+选择特征： selected_features_rfe 包含通过RFE选择的10个特征的名称。
+X_selected_rfe： 包含通过RFE选择的特征的特征矩阵。
+备注： RFE是一种包裹式方法，根据基估计器的重要性反复选择特征，适用于高维数据的特征选择。
+
+6. 数据预处理（标准化）
+
+        
+
+# 数据预处理
+scaler_X = StandardScaler()
+scaler_y = StandardScaler()
+X_scaled_mi = scaler_X.fit_transform(X_selected_mi)
+X_scaled_rfe = scaler_X.fit_transform(X_selected_rfe)
+y_scaled = scaler_y.fit_transform(y.values.reshape(-1, 1)).flatten()
+解释：
+标准化： 将特征和目标变量进行标准化处理，移除均值并缩放到单位方差。
+scaler_X： 用于标准化特征矩阵。
+scaler_y： 用于标准化目标变量。
+X_scaled_mi： 通过互信息法选择的特征矩阵进行标准化后的数据。
+X_scaled_rfe： 通过RFE选择的特征矩阵进行标准化后的数据。
+y_scaled： 标准化后的目标变量。
+备注： 标准化对于一些对特征尺度敏感的模型（如岭回归、支持向量机和神经网络）至关重要。
+
+7. 分割数据集为训练集和测试集
+
+
+# 分割数据集
+X_train_mi, X_test_mi, y_train, y_test = train_test_split(X_scaled_mi, y_scaled, test_size=0.2, random_state=42)
+X_train_rfe, X_test_rfe = train_test_split(X_scaled_rfe, test_size=0.2, random_state=42)
+解释：
+train_test_split： 将数据集分割为训练集和测试集。
+test_size=0.2： 保留20%的数据用于测试，80%用于训练。
+random_state=42： 确保分割的可重现性。
+X_train_mi & X_test_mi： 通过互信息法选择的特征的训练集和测试集。
+X_train_rfe & X_test_rfe： 通过RFE选择的特征的训练集和测试集。
+备注： 确保不同特征选择方法下训练和测试集的一致性，有助于公平比较模型性能。
+
+8. 岭回归（Ridge Regression）及其超参数调优
+8.1 定义岭回归的参数网格
+
+
+# 定义参数网格（岭回归）
+param_grid_ridge = {
+    'alpha': [0.1, 1, 10, 100]  # 正则化强度，值越大正则化越强
+}
+解释：
+param_grid_ridge： 定义岭回归模型中 alpha 参数的取值范围。
+alpha： 正则化强度，值越大表示正则化越强，降低模型过拟合的风险。
+8.2 使用互信息法选择特征的岭回归模型
+
+        
+
+# 初始化岭回归模型
+ridge = Ridge()
+
+# 使用网格搜索和交叉验证选择最佳参数（互信息法）
+grid_search_ridge_mi = GridSearchCV(ridge, param_grid_ridge, cv=5, scoring='r2')
+grid_search_ridge_mi.fit(X_train_mi, y_train)
+
+# 输出最佳参数（互信息法）
+print(f'Best alpha (Ridge, MI): {grid_search_ridge_mi.best_params_["alpha"]}')
+
+# 使用最佳参数重新训练模型（互信息法）
+best_ridge_mi = grid_search_ridge_mi.best_estimator_
+best_ridge_mi.fit(X_train_mi, y_train)
+
+# 预测（互信息法）
+y_train_pred_ridge_mi = best_ridge_mi.predict(X_train_mi)
+y_test_pred_ridge_mi = best_ridge_mi.predict(X_test_mi)
+解释：
+初始化模型： 创建一个岭回归实例。
+GridSearchCV： 对 alpha 参数进行网格搜索，使用5折交叉验证（cv=5），评估指标为R²分数（scoring='r2'）。
+拟合模型： 在通过互信息法选择的训练集 X_train_mi 和 y_train 上进行训练。
+获取最佳参数： 打印最佳的 alpha 值。
+重新训练模型： 使用最佳的 alpha 值在训练集上重新训练岭回归模型。
+预测： 对训练集和测试集进行预测，分别得到 y_train_pred_ridge_mi 和 y_test_pred_ridge_mi。
+备注： 岭回归通过添加L2正则化项，能够有效处理多重共线性问题，提升模型的泛化能力。
+
+8.3 使用RFE选择特征的岭回归模型
+
+        
+
+# 使用网格搜索和交叉验证选择最佳参数（递归特征消除法）
+grid_search_ridge_rfe = GridSearchCV(ridge, param_grid_ridge, cv=5, scoring='r2')
+grid_search_ridge_rfe.fit(X_train_rfe, y_train)
+
+# 输出最佳参数（递归特征消除法）
+print(f'Best alpha (Ridge, RFE): {grid_search_ridge_rfe.best_params_["alpha"]}')
+
+# 使用最佳参数重新训练模型（递归特征消除法）
+best_ridge_rfe = grid_search_ridge_rfe.best_estimator_
+best_ridge_rfe.fit(X_train_rfe, y_train)
+
+# 预测（递归特征消除法）
+y_train_pred_ridge_rfe = best_ridge_rfe.predict(X_train_rfe)
+y_test_pred_ridge_rfe = best_ridge_rfe.predict(X_test_rfe)
+解释：
+网格搜索： 类似于互信息法，但应用于通过RFE选择的特征集 X_train_rfe。
+获取最佳参数与重新训练： 确定最佳 alpha，重新训练模型，并在训练集和测试集上进行预测。
+9. 随机森林回归器（Random Forest Regressor）及其超参数调优
+9.1 定义随机森林的参数网格
+
+        
+
+# 定义参数网格（随机森林）
+param_grid_rf = {
+    'n_estimators': [50, 100, 200],  # 树的数量
+    'max_depth': [None, 10, 20, 30]  # 树的最大深度
+}
+解释：
+param_grid_rf： 定义随机森林模型中 n_estimators 和 max_depth 参数的取值范围。
+n_estimators： 森林中树的数量，更多的树通常可以提升模型的表现，但会增加计算成本。
+max_depth： 树的最大深度，None 表示直到所有叶子都是纯净的或包含少于 min_samples_split 的样本。
+9.2 使用互信息法选择特征的随机森林模型
+
+        
+
+# 初始化随机森林模型
+rf = RandomForestRegressor(random_state=42)
+
+# 使用网格搜索和交叉验证选择最佳参数（互信息法）
+grid_search_rf_mi = GridSearchCV(rf, param_grid_rf, cv=5, scoring='r2')
+grid_search_rf_mi.fit(X_train_mi, y_train)
+
+# 输出最佳参数（互信息法）
+print(f'Best params (RF, MI): {grid_search_rf_mi.best_params_}')
+
+# 使用最佳参数重新训练模型（互信息法）
+best_rf_mi = grid_search_rf_mi.best_estimator_
+best_rf_mi.fit(X_train_mi, y_train)
+
+# 预测（互信息法）
+y_train_pred_rf_mi = best_rf_mi.predict(X_train_mi)
+y_test_pred_rf_mi = best_rf_mi.predict(X_test_mi)
+解释：
+初始化模型： 创建一个 RandomForestRegressor 实例，设置 random_state=42 确保结果可重现。
+网格搜索： 对 n_estimators 和 max_depth 进行超参数调优，使用5折交叉验证，评估指标为R²分数。
+获取最佳参数与重新训练： 确定最佳参数，重新训练模型，并在训练集和测试集上进行预测。
+9.3 使用RFE选择特征的随机森林模型
+
+        
+
+# 使用网格搜索和交叉验证选择最佳参数（递归特征消除法）
+grid_search_rf_rfe = GridSearchCV(rf, param_grid_rf, cv=5, scoring='r2')
+grid_search_rf_rfe.fit(X_train_rfe, y_train)
+
+# 输出最佳参数（递归特征消除法）
+print(f'Best params (RF, RFE): {grid_search_rf_rfe.best_params_}')
+
+# 使用最佳参数重新训练模型（递归特征消除法）
+best_rf_rfe = grid_search_rf_rfe.best_estimator_
+best_rf_rfe.fit(X_train_rfe, y_train)
+
+# 预测（递归特征消除法）
+y_train_pred_rf_rfe = best_rf_rfe.predict(X_train_rfe)
+y_test_pred_rf_rfe = best_rf_rfe.predict(X_test_rfe)
+解释：
+网格搜索： 类似于互信息法，但应用于通过RFE选择的特征集 X_train_rfe。
+获取最佳参数与重新训练： 确定最佳参数，重新训练模型，并在训练集和测试集上进行预测。
+10. 其他回归模型的训练与预测
+10.1 线性回归模型
+
+
+# 线性回归模型
+linear_reg = LinearRegression()
+linear_reg.fit(X_train_mi, y_train)
+y_train_pred_linear = linear_reg.predict(X_train_mi)
+y_test_pred_linear = linear_reg.predict(X_test_mi)
+解释：
+初始化与训练： 创建一个 LinearRegression 实例，并在通过互信息法选择的训练集 X_train_mi 和 y_train 上进行训练。
+预测： 在训练集和测试集上进行预测。
+10.2 主成分回归模型（PCA Regression）
+
+        
+
+# 主成分回归模型
+pca = PCA(n_components=8)  # 主成分数量
+X_train_pca = pca.fit_transform(X_train_mi)
+X_test_pca = pca.transform(X_test_mi)
+linear_reg_pca = LinearRegression()
+linear_reg_pca.fit(X_train_pca, y_train)
+y_train_pred_pca = linear_reg_pca.predict(X_train_pca)
+y_test_pred_pca = linear_reg_pca.predict(X_test_pca)
+解释：
+降维： 使用主成分分析（PCA）将特征维数降至8个主要成分。
+n_components=8： 指定要提取的主成分数量。
+训练与预测： 在降维后的数据 X_train_pca 上训练线性回归模型，并对训练集和测试集进行预测。
+10.3 偏最小二乘回归模型（PLS Regression）
+
+        
+
+# 偏最小二乘回归模型
+pls = PLSRegression(n_components=8)  # 主成分数量
+pls.fit(X_train_mi, y_train)
+y_train_pred_pls = pls.predict(X_train_mi).flatten()
+y_test_pred_pls = pls.predict(X_test_mi).flatten()
+解释：
+初始化与训练： 创建一个偏最小二乘回归（PLSRegression）实例，指定8个主成分，并在训练集上进行训练。
+预测： 对训练集和测试集进行预测，使用 flatten() 将结果转换为一维数组。
+10.4 支持向量机回归模型（Support Vector Regression, SVR）
+
+        
+
+# 支持向量机回归模型
+svr = SVR()
+param_grid_svr = {
+    'C': [0.1, 1, 10],  # 惩罚参数，值越大对误差的惩罚越大
+    'epsilon': [0.01, 0.1, 1]  # epsilon-SVR中的epsilon参数，控制模型的精度
+}
+grid_search_svr = GridSearchCV(svr, param_grid_svr, cv=5, scoring='r2')
+grid_search_svr.fit(X_train_mi, y_train)
+best_svr = grid_search_svr.best_estimator_
+best_svr.fit(X_train_mi, y_train)
+y_train_pred_svr = best_svr.predict(X_train_mi)
+y_test_pred_svr = best_svr.predict(X_test_mi)
+解释：
+初始化模型： 创建一个 SVR 实例。
+定义参数网格：
+C： 惩罚参数，控制模型对误差的惩罚程度，值越大模型对误差越敏感。
+epsilon： 控制模型的精度，决定了在回归过程中允许的误差范围。
+网格搜索与训练： 使用 GridSearchCV 对 C 和 epsilon 进行调优，使用5折交叉验证，评估指标为R²分数。
+获取最佳模型并预测： 确定最佳参数，重新训练模型，并在训练集和测试集上进行预测。
+10.5 梯度提升回归模型（Gradient Boosting Regressor, GBR）
+
+        
+
+# 梯度提升回归模型
+gbr = GradientBoostingRegressor(random_state=42)
+param_grid_gbr = {
+    'n_estimators': [50, 100, 200],  # 弱学习器的数量
+    'learning_rate': [0.01, 0.1, 0.2]  # 学习率，控制每个弱学习器对最终模型的贡献
+}
+grid_search_gbr = GridSearchCV(gbr, param_grid_gbr, cv=5, scoring='r2')
+grid_search_gbr.fit(X_train_mi, y_train)
+best_gbr = grid_search_gbr.best_estimator_
+best_gbr.fit(X_train_mi, y_train)
+y_train_pred_gbr = best_gbr.predict(X_train_mi)
+y_test_pred_gbr = best_gbr.predict(X_test_mi)
+解释：
+初始化模型： 创建一个 GradientBoostingRegressor 实例，设置 random_state=42 以确保结果可重现。
+定义参数网格：
+n_estimators： 弱学习器（决策树）的数量，更多的学习器通常可以提升模型性能，但会增加计算开销。
+learning_rate： 学习率，控制各个弱学习器在最终模型中的贡献。
+网格搜索与训练： 使用 GridSearchCV 对 n_estimators 和 learning_rate 进行超参数调优，使用5折交叉验证，评估指标为R²分数。
+获取最佳模型并预测： 确定最佳参数，重新训练模型，并在训练集和测试集上进行预测。
+10.6 神经网络回归模型（Multi-layer Perceptron Regressor, MLP）
+
+        
+
+# 神经网络模型
+mlp = MLPRegressor(random_state=42, max_iter=50000)  # 设置最大迭代次数为50000
+param_grid_mlp = {
+    'hidden_layer_sizes': [(50,), (100,), (50, 50)],  # 隐藏层的结构
+    'activation': ['relu', 'tanh'],  # 激活函数
+    'solver': ['adam', 'lbfgs'],  # 优化算法
+    'alpha': [0.0001, 0.001]  # L2正则化参数
+}
+grid_search_mlp = GridSearchCV(mlp, param_grid_mlp, cv=5, scoring='r2')
+grid_search_mlp.fit(X_train_mi, y_train)
+best_mlp = grid_search_mlp.best_estimator_
+best_mlp.fit(X_train_mi, y_train)
+y_train_pred_mlp = best_mlp.predict(X_train_mi)
+y_test_pred_mlp = best_mlp.predict(X_test_mi)
+解释：
+初始化模型： 创建一个 MLPRegressor 实例，设置 random_state=42 以确保结果可重现，max_iter=50000 设置最大迭代次数以确保模型收敛。
+定义参数网格：
+hidden_layer_sizes： 隐藏层的结构，例如单层50个神经元，单层100个神经元，或两层各50个神经元。
+activation： 激活函数，选择 relu 或 tanh。
+solver： 优化算法，选择 adam 或 lbfgs。
+alpha： L2正则化参数，控制权重的惩罚程度。
+网格搜索与训练： 使用 GridSearchCV 对上述参数进行超参数调优，使用5折交叉验证，评估指标为R²分数。
+获取最佳模型并预测： 确定最佳参数，重新训练模型，并在训练集和测试集上进行预测。
+11. 模型评估函数定义
+
+        
+
+# 评估模型
+def evaluate_model(y_true, y_pred):
+    slope, intercept, r_value, p_value, std_err = linregress(y_true, y_pred)
+    r2 = r_value**2
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    return r2, rmse, mae
+解释：
+evaluate_model： 定义了一个评估函数，计算三个指标：
+R²分数（r2）： 通过线性回归的斜率得到。
+均方根误差（RMSE）： 评估预测值与真实值之间的偏差。
+平均绝对误差（MAE）： 评估预测值与真实值之间的绝对偏差。
+12. 对各模型进行评估
+12.1 岭回归评估
+
+        
+
+# 岭回归评估
+train_r2_ridge_mi, train_rmse_ridge_mi, train_mae_ridge_mi = evaluate_model(y_train, y_train_pred_ridge_mi)
+test_r2_ridge_mi, test_rmse_ridge_mi, test_mae_ridge_mi = evaluate_model(y_test, y_test_pred_ridge_mi)
+
+train_r2_ridge_rfe, train_rmse_ridge_rfe, train_mae_ridge_rfe = evaluate_model(y_train, y_train_pred_ridge_rfe)
+test_r2_ridge_rfe, test_rmse_ridge_rfe, test_mae_ridge_rfe = evaluate_model(y_test, y_test_pred_ridge_rfe)
+解释：
+分别对通过互信息法和RFE选择特征的岭回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.2 随机森林评估
+
+        
+
+# 随机森林评估
+train_r2_rf_mi, train_rmse_rf_mi, train_mae_rf_mi = evaluate_model(y_train, y_train_pred_rf_mi)
+test_r2_rf_mi, test_rmse_rf_mi, test_mae_rf_mi = evaluate_model(y_test, y_test_pred_rf_mi)
+
+train_r2_rf_rfe, train_rmse_rf_rfe, train_mae_rf_rfe = evaluate_model(y_train, y_train_pred_rf_rfe)
+test_r2_rf_rfe, test_rmse_rf_rfe, test_mae_rf_rfe = evaluate_model(y_test, y_test_pred_rf_rfe)
+解释：
+分别对通过互信息法和RFE选择特征的随机森林模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.3 线性回归评估
+
+
+# 线性回归评估
+train_r2_linear, train_rmse_linear, train_mae_linear = evaluate_model(y_train, y_train_pred_linear)
+test_r2_linear, test_rmse_linear, test_mae_linear = evaluate_model(y_test, y_test_pred_linear)
+解释：
+对线性回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.4 主成分回归评估
+
+        
+
+# 主成分回归评估
+train_r2_pca, train_rmse_pca, train_mae_pca = evaluate_model(y_train, y_train_pred_pca)
+test_r2_pca, test_rmse_pca, test_mae_pca = evaluate_model(y_test, y_test_pred_pca)
+解释：
+对主成分回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.5 偏最小二乘回归评估
+
+        
+
+# 偏最小二乘回归评估
+train_r2_pls, train_rmse_pls, train_mae_pls = evaluate_model(y_train, y_train_pred_pls)
+test_r2_pls, test_rmse_pls, test_mae_pls = evaluate_model(y_test, y_test_pred_pls)
+解释：
+对偏最小二乘回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.6 支持向量机回归评估
+
+
+# 支持向量机回归评估
+train_r2_svr, train_rmse_svr, train_mae_svr = evaluate_model(y_train, y_train_pred_svr)
+test_r2_svr, test_rmse_svr, test_mae_svr = evaluate_model(y_test, y_test_pred_svr)
+解释：
+对支持向量机回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.7 梯度提升回归评估
+
+        
+
+# 梯度提升回归评估
+train_r2_gbr, train_rmse_gbr, train_mae_gbr = evaluate_model(y_train, y_train_pred_gbr)
+test_r2_gbr, test_rmse_gbr, test_mae_gbr = evaluate_model(y_test, y_test_pred_gbr)
+解释：
+对梯度提升回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+12.8 神经网络评估
+
+
+# 神经网络评估
+train_r2_mlp, train_rmse_mlp, train_mae_mlp = evaluate_model(y_train, y_train_pred_mlp)
+test_r2_mlp, test_rmse_mlp, test_mae_mlp = evaluate_model(y_test, y_test_pred_mlp)
+解释：
+对神经网络回归模型，在训练集和测试集上计算R²、RMSE和MAE。
+13. 打印各模型的评估结果
+
+
+print(f'Training R2 (RF, MI): {train_r2_rf_mi:.4f}, RMSE: {train_rmse_rf_mi:.4f}, MAE: {train_mae_rf_mi:.4f}')
+print(f'Testing R2 (RF, MI): {test_r2_rf_mi:.4f}, RMSE: {test_rmse_rf_mi:.4f}, MAE: {test_mae_rf_mi:.4f}')
+
+print(f'Training R2 (RF, RFE): {train_r2_rf_rfe:.4f}, RMSE: {train_rmse_rf_rfe:.4f}, MAE: {train_mae_rf_rfe:.4f}')
+print(f'Testing R2 (RF, RFE): {test_r2_rf_rfe:.4f}, RMSE: {test_rmse_rf_rfe:.4f}, MAE: {test_mae_rf_rfe:.4f}')
+
+print(f'Training R2 (Linear): {train_r2_linear:.4f}, RMSE: {train_rmse_linear:.4f}, MAE: {train_mae_linear:.4f}')
+print(f'Testing R2 (Linear): {test_r2_linear:.4f}, RMSE: {test_rmse_linear:.4f}, MAE: {test_mae_linear:.4f}')
+
+print(f'Training R2 (PCA): {train_r2_pca:.4f}, RMSE: {train_rmse_pca:.4f}, MAE: {train_mae_pca:.4f}')
+print(f'Testing R2 (PCA): {test_r2_pca:.4f}, RMSE: {test_rmse_pca:.4f}, MAE: {test_mae_pca:.4f}')
+
+print(f'Training R2 (PLS): {train_r2_pls:.4f}, RMSE: {train_rmse_pls:.4f}, MAE: {train_mae_pls:.4f}')
+print(f'Testing R2 (PLS): {test_r2_pls:.4f}, RMSE: {test_rmse_pls:.4f}, MAE: {test_mae_pls:.4f}')
+
+print(f'Training R2 (SVR): {train_r2_svr:.4f}, RMSE: {train_rmse_svr:.4f}, MAE: {train_mae_svr:.4f}')
+print(f'Testing R2 (SVR): {test_r2_svr:.4f}, RMSE: {test_rmse_svr:.4f}, MAE: {test_mae_svr:.4f}')
+
+print(f'Training R2 (GBR): {train_r2_gbr:.4f}, RMSE: {train_rmse_gbr:.4f}, MAE: {train_mae_gbr:.4f}')
+print(f'Testing R2 (GBR): {test_r2_gbr:.4f}, RMSE: {test_rmse_gbr:.4f}, MAE: {test_mae_gbr:.4f}')
+
+print(f'Training R2 (MLP): {train_r2_mlp:.4f}, RMSE: {train_rmse_mlp:.4f}, MAE: {train_mae_mlp:.4f}')
+print(f'Testing R2 (MLP): {test_r2_mlp:.4f}, RMSE: {test_rmse_mlp:.4f}, MAE: {test_mae_mlp:.4f}')
+解释：
+分别打印各个模型（随机森林、线性回归、PCA回归、PLS回归、SVR、GBR、神经网络）在训练集和测试集上的R²、RMSE和MAE指标。
+14. 交叉验证
+
+        
+
+# 交叉验证
+cv_scores_ridge_mi = cross_val_score(best_ridge_mi, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+cv_scores_ridge_rfe = cross_val_score(best_ridge_rfe, X_scaled_rfe, y_scaled, cv=5, scoring='r2')
+
+cv_scores_rf_mi = cross_val_score(best_rf_mi, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+cv_scores_rf_rfe = cross_val_score(best_rf_rfe, X_scaled_rfe, y_scaled, cv=5, scoring='r2')
+
+cv_scores_linear = cross_val_score(linear_reg, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+cv_scores_pca = cross_val_score(linear_reg_pca, pca.transform(X_scaled_mi), y_scaled, cv=5, scoring='r2')
+cv_scores_pls = cross_val_score(pls, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+cv_scores_svr = cross_val_score(best_svr, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+cv_scores_gbr = cross_val_score(best_gbr, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+cv_scores_mlp = cross_val_score(best_mlp, X_scaled_mi, y_scaled, cv=5, scoring='r2')
+
+print(f'Cross-Validation R2 Scores (Ridge, MI): {cv_scores_ridge_mi}')
+print(f'Mean CV R2 Score (Ridge, MI): {np.mean(cv_scores_ridge_mi):.4f}')
+
+print(f'Cross-Validation R2 Scores (Ridge, RFE): {cv_scores_ridge_rfe}')
+print(f'Mean CV R2 Score (Ridge, RFE): {np.mean(cv_scores_ridge_rfe):.4f}')
+
+print(f'Cross-Validation R2 Scores (RF, MI): {cv_scores_rf_mi}')
+print(f'Mean CV R2 Score (RF, MI): {np.mean(cv_scores_rf_mi):.4f}')
+
+print(f'Cross-Validation R2 Scores (RF, RFE): {cv_scores_rf_rfe}')
+print(f'Mean CV R2 Score (RF, RFE): {np.mean(cv_scores_rf_rfe):.4f}')
+
+print(f'Cross-Validation R2 Scores (Linear): {cv_scores_linear}')
+print(f'Mean CV R2 Score (Linear): {np.mean(cv_scores_linear):.4f}')
+
+print(f'Cross-Validation R2 Scores (PCA): {cv_scores_pca}')
+print(f'Mean CV R2 Score (PCA): {np.mean(cv_scores_pca):.4f}')
+
+print(f'Cross-Validation R2 Scores (PLS): {cv_scores_pls}')
+print(f'Mean CV R2 Score (PLS): {np.mean(cv_scores_pls):.4f}')
+
+print(f'Cross-Validation R2 Scores (SVR): {cv_scores_svr}')
+print(f'Mean CV R2 Score (SVR): {np.mean(cv_scores_svr):.4f}')
+
+print(f'Cross-Validation R2 Scores (GBR): {cv_scores_gbr}')
+print(f'Mean CV R2 Score (GBR): {np.mean(cv_scores_gbr):.4f}')
+
+print(f'Cross-Validation R2 Scores (MLP): {cv_scores_mlp}')
+print(f'Mean CV R2 Score (MLP): {np.mean(cv_scores_mlp):.4f}')
+解释：
+cross_val_score： 对各个模型进行5折交叉验证，计算R²分数。
+岭回归（互信息法和RFE法）
+随机森林（互信息法和RFE法）
+线性回归
+PCA回归
+PLS回归
+支持向量机回归
+梯度提升回归
+神经网络回归
+打印结果： 输出每个模型在交叉验证中的R²分数列表及其平均值。
+备注： 交叉验证提供了模型在不同数据子集上的稳定性评估，有助于判断模型的泛化能力。
+
+15. 逆标准化处理
+
+        
+
+# 逆标准化处理
+y_train_inv = scaler_y.inverse_transform(y_train.reshape(-1, 1)).flatten()
+y_test_inv = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
+y_train_pred_ridge_mi_inv = scaler_y.inverse_transform(y_train_pred_ridge_mi.reshape(-1, 1)).flatten()
+y_test_pred_ridge_mi_inv = scaler_y.inverse_transform(y_test_pred_ridge_mi.reshape(-1, 1)).flatten()
+y_train_pred_ridge_rfe_inv = scaler_y.inverse_transform(y_train_pred_ridge_rfe.reshape(-1, 1)).flatten()
+y_test_pred_ridge_rfe_inv = scaler_y.inverse_transform(y_test_pred_ridge_rfe.reshape(-1, 1)).flatten()
+y_train_pred_rf_mi_inv = scaler_y.inverse_transform(y_train_pred_rf_mi.reshape(-1, 1)).flatten()
+y_test_pred_rf_mi_inv = scaler_y.inverse_transform(y_test_pred_rf_mi.reshape(-1, 1)).flatten()
+y_train_pred_rf_rfe_inv = scaler_y.inverse_transform(y_train_pred_rf_rfe.reshape(-1, 1)).flatten()
+y_test_pred_rf_rfe_inv = scaler_y.inverse_transform(y_test_pred_rf_rfe.reshape(-1, 1)).flatten()
+y_train_pred_linear_inv = scaler_y.inverse_transform(y_train_pred_linear.reshape(-1, 1)).flatten()
+y_test_pred_linear_inv = scaler_y.inverse_transform(y_test_pred_linear.reshape(-1, 1)).flatten()
+y_train_pred_pca_inv = scaler_y.inverse_transform(y_train_pred_pca.reshape(-1, 1)).flatten()
+y_test_pred_pca_inv = scaler_y.inverse_transform(y_test_pred_pca.reshape(-1, 1)).flatten()
+y_train_pred_pls_inv = scaler_y.inverse_transform(y_train_pred_pls.reshape(-1, 1)).flatten()
+y_test_pred_pls_inv = scaler_y.inverse_transform(y_test_pred_pls.reshape(-1, 1)).flatten()
+y_train_pred_svr_inv = scaler_y.inverse_transform(y_train_pred_svr.reshape(-1, 1)).flatten()
+y_test_pred_svr_inv = scaler_y.inverse_transform(y_test_pred_svr.reshape(-1, 1)).flatten()
+y_train_pred_gbr_inv = scaler_y.inverse_transform(y_train_pred_gbr.reshape(-1, 1)).flatten()
+y_test_pred_gbr_inv = scaler_y.inverse_transform(y_test_pred_gbr.reshape(-1, 1)).flatten()
+y_train_pred_mlp_inv = scaler_y.inverse_transform(y_train_pred_mlp.reshape(-1, 1)).flatten()
+y_test_pred_mlp_inv = scaler_y.inverse_transform(y_test_pred_mlp.reshape(-1, 1)).flatten()
+解释：
+逆标准化： 将所有训练集和测试集的实际值及预测值从标准化状态恢复到原始尺度。
+原始标量变换： 使用之前定义的 scaler_y 对 y 及预测值进行逆变换，确保结果可解释为原始的有机质含量单位（g/kg）。
+flatten()： 将二维数组转换为一维数组，便于后续处理和保存。
+16. 将训练集和测试集的实际值与预测值保存到Excel文件
+16.1 保存训练集结果
+
+        
+
+# 保存训练集实际值和预测值到Excel文件
+train_results = {
+    'Actual Train': y_train_inv,
+    'Predicted Train (Ridge, MI)': y_train_pred_ridge_mi_inv,
+    'Predicted Train (Ridge, RFE)': y_train_pred_ridge_rfe_inv,
+    'Predicted Train (RF, MI)': y_train_pred_rf_mi_inv,
+    'Predicted Train (RF, RFE)': y_train_pred_rf_rfe_inv,
+    'Predicted Train (Linear)': y_train_pred_linear_inv,
+    'Predicted Train (PCA)': y_train_pred_pca_inv,
+    'Predicted Train (PLS)': y_train_pred_pls_inv,
+    'Predicted Train (SVR)': y_train_pred_svr_inv,
+    'Predicted Train (GBR)': y_train_pred_gbr_inv,
+    'Predicted Train (MLP)': y_train_pred_mlp_inv
+}
+
+train_results_df = pd.DataFrame(train_results)
+train_results_df.to_excel('训练集实际值和预测值.xlsx', index=False)
+解释：
+构建字典 train_results： 包含训练集的实际有机质值和各个模型的预测值。
+转换为DataFrame： 使用Pandas将字典转换为DataFrame。
+保存为Excel： 将训练集的实际值和预测值保存到 '训练集实际值和预测值.xlsx' 文件中。
+16.2 保存测试集结果
+
+        
+
+# 保存测试集实际值和预测值到Excel文件
+test_results = {
+    'Actual Test': y_test_inv,
+    'Predicted Test (Ridge, MI)': y_test_pred_ridge_mi_inv,
+    'Predicted Test (Ridge, RFE)': y_test_pred_ridge_rfe_inv,
+    'Predicted Test (RF, MI)': y_test_pred_rf_mi_inv,
+    'Predicted Test (RF, RFE)': y_test_pred_rf_rfe_inv,
+    'Predicted Test (Linear)': y_test_pred_linear_inv,
+    'Predicted Test (PCA)': y_test_pred_pca_inv,
+    'Predicted Test (PLS)': y_test_pred_pls_inv,
+    'Predicted Test (SVR)': y_test_pred_svr_inv,
+    'Predicted Test (GBR)': y_test_pred_gbr_inv,
+    'Predicted Test (MLP)': y_test_pred_mlp_inv
+}
+
+test_results_df = pd.DataFrame(test_results)
+test_results_df.to_excel('测试集实际值和预测值.xlsx', index=False)
+解释：
+构建字典 test_results： 包含测试集的实际有机质值和各个模型的预测值。
+转换为DataFrame并保存： 将测试集的实际值和预测值保存到 '测试集实际值和预测值.xlsx' 文件中。
+17. 可视化预测结果
+17.1 绘制部分模型在训练集和测试集的预测结果
+
+        
+
+# 可视化结果
+fig, axes = plt.subplots(6, 2, figsize=(15, 30))
+
+# 绘制训练集结果
+axes[0, 0].plot(y_train_inv, label='Actual Train')
+axes[0, 0].plot(y_train_pred_ridge_mi_inv, label='Predicted Train (Ridge, MI)')
+axes[0, 0].legend()
+axes[0, 0].set_title('Training Set: Actual vs Predicted (Ridge, MI)')
+
+axes[1, 0].plot(y_train_inv, label='Actual Train')
+axes[1, 0].plot(y_train_pred_ridge_rfe_inv, label='Predicted Train (Ridge, RFE)')
+axes[1, 0].legend()
+axes[1, 0].set_title('Training Set: Actual vs Predicted (Ridge, RFE)')
+
+axes[2, 0].plot(y_train_inv, label='Actual Train')
+axes[2, 0].plot(y_train_pred_rf_mi_inv, label='Predicted Train (RF, MI)')
+axes[2, 0].legend()
+axes[2, 0].set_title('Training Set: Actual vs Predicted (RF, MI)')
+
+axes[3, 0].plot(y_train_inv, label='Actual Train')
+axes[3, 0].plot(y_train_pred_rf_rfe_inv, label='Predicted Train (RF, RFE)')
+axes[3, 0].legend()
+axes[3, 0].set_title('Training Set: Actual vs Predicted (RF, RFE)')
+
+axes[4, 0].plot(y_train_inv, label='Actual Train')
+axes[4, 0].plot(y_train_pred_linear_inv, label='Predicted Train (Linear)')
+axes[4, 0].legend()
+axes[4, 0].set_title('Training Set: Actual vs Predicted (Linear)')
+
+axes[5, 0].plot(y_train_inv, label='Actual Train')
+axes[5, 0].plot(y_train_pred_pca_inv, label='Predicted Train (PCA)')
+axes[5, 0].legend()
+axes[5, 0].set_title('Training Set: Actual vs Predicted (PCA)')
+
+# 绘制测试集结果
+axes[0, 1].plot(y_test_inv, label='Actual Test')
+axes[0, 1].plot(y_test_pred_ridge_mi_inv, label='Predicted Test (Ridge, MI)')
+axes[0, 1].legend()
+axes[0, 1].set_title('Test Set: Actual vs Predicted (Ridge, MI)')
+
+axes[1, 1].plot(y_test_inv, label='Actual Test')
+axes[1, 1].plot(y_test_pred_ridge_rfe_inv, label='Predicted Test (Ridge, RFE)')
+axes[1, 1].legend()
+axes[1, 1].set_title('Test Set: Actual vs Predicted (Ridge, RFE)')
+
+axes[2, 1].plot(y_test_inv, label='Actual Test')
+axes[2, 1].plot(y_test_pred_rf_mi_inv, label='Predicted Test (RF, MI)')
+axes[2, 1].legend()
+axes[2, 1].set_title('Test Set: Actual vs Predicted (RF, MI)')
+
+axes[3, 1].plot(y_test_inv, label='Actual Test')
+axes[3, 1].plot(y_test_pred_rf_rfe_inv, label='Predicted Test (RF, RFE)')
+axes[3, 1].legend()
+axes[3, 1].set_title('Test Set: Actual vs Predicted (RF, RFE)')
+
+axes[4, 1].plot(y_test_inv, label='Actual Test')
+axes[4, 1].plot(y_test_pred_linear_inv, label='Predicted Test (Linear)')
+axes[4, 1].legend()
+axes[4, 1].set_title('Test Set: Actual vs Predicted (Linear)')
+
+axes[5, 1].plot(y_test_pred_pca_inv, label='Predicted Test (PCA)')
+axes[5, 1].legend()
+axes[5, 1].set_title('Test Set: Actual vs Predicted (PCA)')
+
+plt.tight_layout()
+plt.show()
+解释：
+创建子图： 使用 plt.subplots(6, 2, figsize=(15, 30)) 创建一个6行2列的子图布局，图像大小为15x30英寸。
+训练集结果绘制： 前6个子图（左列）分别绘制：
+实际值 vs 通过岭回归（互信息法）预测值
+实际值 vs 通过岭回归（RFE法）预测值
+实际值 vs 通过随机森林（互信息法）预测值
+实际值 vs 通过随机森林（RFE法）预测值
+实际值 vs 线性回归预测值
+实际值 vs PCA回归预测值
+测试集结果绘制： 后6个子图（右列）分别绘制：
+实际值 vs 通过岭回归（互信息法）预测值
+实际值 vs 通过岭回归（RFE法）预测值
+实际值 vs 通过随机森林（互信息法）预测值
+实际值 vs 通过随机森林（RFE法）预测值
+实际值 vs 线性回归预测值
+实际值 vs PCA回归预测值
+调整布局并显示： 使用 plt.tight_layout() 调整子图间距，使用 plt.show() 显示图像。
+17.2 绘制其他模型（PLS、SVR、GBR、MLP）的预测结果
+
+        
+
+fig, axes = plt.subplots(6, 2, figsize=(15, 30))
+
+# 绘制训练集结果
+axes[0, 0].plot(y_train_inv, label='Actual Train')
+axes[0, 0].plot(y_train_pred_pls_inv, label='Predicted Train (PLS)')
+axes[0, 0].legend()
+axes[0, 0].set_title('Training Set: Actual vs Predicted (PLS)')
+
+axes[1, 0].plot(y_train_inv, label='Actual Train')
+axes[1, 0].plot(y_train_pred_svr_inv, label='Predicted Train (SVR)')
+axes[1, 0].legend()
+axes[1, 0].set_title('Training Set: Actual vs Predicted (SVR)')
+
+axes[2, 0].plot(y_train_inv, label='Actual Train')
+axes[2, 0].plot(y_train_pred_gbr_inv, label='Predicted Train (GBR)')
+axes[2, 0].legend()
+axes[2, 0].set_title('Training Set: Actual vs Predicted (GBR)')
+
+axes[3, 0].plot(y_train_inv, label='Actual Train')
+axes[3, 0].plot(y_train_pred_mlp_inv, label='Predicted Train (MLP)')
+axes[3, 0].legend()
+axes[3, 0].set_title('Training Set: Actual vs Predicted (MLP)')
+
+# 绘制测试集结果
+axes[0, 1].plot(y_test_inv, label='Actual Test')
+axes[0, 1].plot(y_test_pred_pls_inv, label='Predicted Test (PLS)')
+axes[0, 1].legend()
+axes[0, 1].set_title('Test Set: Actual vs Predicted (PLS)')
+
+axes[1, 1].plot(y_test_inv, label='Actual Test')
+axes[1, 1].plot(y_test_pred_svr_inv, label='Predicted Test (SVR)')
+axes[1, 1].legend()
+axes[1, 1].set_title('Test Set: Actual vs Predicted (SVR)')
+
+axes[2, 1].plot(y_test_inv, label='Actual Test')
+axes[2, 1].plot(y_test_pred_gbr_inv, label='Predicted Test (GBR)')
+axes[2, 1].legend()
+axes[2, 1].set_title('Test Set: Actual vs Predicted (GBR)')
+
+axes[3, 1].plot(y_test_inv, label='Actual Test')
+axes[3, 1].plot(y_test_pred_mlp_inv, label='Predicted Test (MLP)')
+axes[3, 1].legend()
+axes[3, 1].set_title('Test Set: Actual vs Predicted (MLP)')
+
+plt.tight_layout()
+plt.show()
+解释：
+创建子图： 再次使用 plt.subplots(6, 2, figsize=(15, 30)) 创建6行2列的子图布局。
+训练集结果绘制： 前4个子图（左列）分别绘制：
+实际值 vs PLS回归预测值
+实际值 vs 支持向量机回归预测值
+实际值 vs 梯度提升回归预测值
+实际值 vs 神经网络回归预测值
+测试集结果绘制： 后4个子图（右列）分别绘制：
+实际值 vs PLS回归预测值
+实际值 vs 支持向量机回归预测值
+实际值 vs 梯度提升回归预测值
+实际值 vs 神经网络回归预测值
+调整布局并显示： 使用 plt.tight_layout() 调整子图间距，使用 plt.show() 显示图像。
+总结
+该脚本通过以下步骤实现了对土壤有机质含量的预测：
+
+数据读取与预处理： 从Excel文件中读取数据，分离特征和目标变量，并进行标准化处理。
+特征选择： 使用互信息法和递归特征消除法（RFE）分别选择重要特征。
+模型训练与超参数调优： 对多种回归模型（岭回归、随机森林、线性回归、PCA回归、PLS回归、支持向量机回归、梯度提升回归、神经网络）进行训练，并通过网格搜索和交叉验证找到最佳超参数。
+模型评估： 使用R²、RMSE和MAE等指标评估模型在训练集和测试集上的表现，并通过交叉验证进一步验证模型的稳定性。
+结果保存与可视化： 将实际值和预测值保存到Excel文件中，并通过绘图对比不同模型的预测效果。

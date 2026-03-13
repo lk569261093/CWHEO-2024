@@ -1,0 +1,348 @@
+该脚本的主要目标是通过光谱特征预测土壤中锌（Zn）的含量（Zn(mg/kg)），并结合随机森林回归（Random Forest Regressor, RF）和梯度提升回归（Gradient Boosting Regressor, GBR）两种模型，通过加权平均的方法提升预测性能。整个过程包括数据读取、特征选择、数据预处理、模型训练与调优、预测、评估以及结果的保存与可视化。以下是逐步的详细说明：
+
+1. 导入必要的库
+
+        
+python
+复制代码
+import pandas as pd
+import numpy as np
+from sklearn.feature_selection import mutual_info_regression
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+import joblib
+解释：
+Pandas & NumPy： 用于数据处理和数值计算。
+Scikit-learn (sklearn)： 提供特征选择、模型训练、数据分割、标准化、回归模型、超参数调优以及评估指标等功能。
+Scipy： linregress 用于线性回归分析。
+Matplotlib： 用于数据可视化。
+Joblib： 用于模型的保存和加载。
+2. 读取Excel数据文件
+
+        
+python
+复制代码
+# 读取Excel文件
+file_path = '2.Zn光谱特征25.xlsx'
+data = pd.read_excel(file_path)
+解释：
+从路径 '2.Zn光谱特征25.xlsx' 读取Excel文件，并将其存储为Pandas的DataFrame data。该文件包含光谱特征和对应的土壤锌含量数据（Zn(mg/kg)）。
+3. 提取特征与目标变量
+
+        
+python
+复制代码
+# 提取土壤养分数据和光谱数据
+y = data['Zn(mg/kg)']
+X = data.drop(columns=['Zn(mg/kg)'])
+解释：
+y： 目标变量，表示土壤锌含量（Zn(mg/kg)）。
+X： 特征矩阵，包含所有其他列（假定为光谱特征），通过删除目标列得到。
+4. 使用互信息法进行特征选择
+
+        
+python
+复制代码
+# 互信息法选择特征
+mi = mutual_info_regression(X, y, random_state=42)
+selected_features_mi = X.columns[mi > 0.02]
+X_selected_mi = X[selected_features_mi]
+解释：
+互信息回归 (mutual_info_regression)： 测量 X 中每个特征与目标变量 y 之间的依赖性。设置 random_state=42 确保结果可重复。
+特征选择阈值： 选择互信息值大于 0.02 的特征，存储在 selected_features_mi 中。
+X_selected_mi： 包含通过互信息法选择的特征的特征矩阵。
+备注： 互信息能够捕捉特征与目标变量之间的非线性关系，适用于回归任务中的特征选择。
+
+5. 数据预处理（标准化）
+
+        
+python
+复制代码
+# 数据预处理
+scaler_X = StandardScaler()
+scaler_y = StandardScaler()
+X_scaled_mi = scaler_X.fit_transform(X_selected_mi)
+y_scaled = scaler_y.fit_transform(y.values.reshape(-1, 1)).flatten()
+
+# 保存用于标准化的 scaler_y 对象
+joblib.dump(scaler_y, 'scaler_y.pkl')
+解释：
+标准化： 将特征和目标变量进行标准化处理，移除均值并缩放到单位方差。
+scaler_X： 用于标准化特征矩阵。
+scaler_y： 用于标准化目标变量。
+X_scaled_mi： 通过互信息法选择的特征矩阵进行标准化后的数据。
+y_scaled： 标准化后的目标变量。使用 reshape(-1, 1) 将一维数组转换为二维数组，以符合 StandardScaler 的输入要求，然后通过 flatten() 转回一维数组。
+保存标准化对象： 使用 joblib.dump 将 scaler_y 保存为 'scaler_y.pkl'，以便后续在新数据上进行逆标准化处理。
+备注： 标准化对于一些对特征尺度敏感的模型（如岭回归、支持向量机）至关重要。
+
+6. 分割数据集为训练集和测试集
+
+        
+python
+复制代码
+# 分割数据集
+X_train_mi, X_test_mi, y_train, y_test = train_test_split(X_scaled_mi, y_scaled, test_size=0.2, random_state=42)
+解释：
+train_test_split： 将数据集分割为训练集和测试集。
+test_size=0.2： 保留20%的数据用于测试，80%用于训练。
+random_state=42： 确保分割的可重现性。
+结果：
+X_train_mi & X_test_mi： 训练集和测试集的特征数据，通过互信息法选择的特征。
+y_train & y_test： 训练集和测试集的目标变量。
+7. 定义并训练基础模型
+7.1 随机森林回归器 (RandomForestRegressor) 的参数搜索
+
+        
+python
+复制代码
+# 定义随机森林模型并进行参数搜索
+rf = RandomForestRegressor(random_state=42)
+param_grid_rf = {
+    'n_estimators': [50, 100, 200],
+    'max_depth': [None, 10, 20, 30]
+}
+grid_search_rf = GridSearchCV(rf, param_grid_rf, cv=5, scoring='r2')
+grid_search_rf.fit(X_train_mi, y_train)
+best_rf = grid_search_rf.best_estimator_
+解释：
+随机森林回归器 (RandomForestRegressor)：
+初始化： 创建一个 RandomForestRegressor 实例，设置 random_state=42 确保结果可重复。
+定义参数网格 (param_grid_rf)：
+n_estimators： 树的数量，可以选择50、100或200。
+max_depth： 树的最大深度，None 表示节点会一直扩展直到所有叶子节点都是纯净的或叶子节点包含的样本数少于 min_samples_split。
+网格搜索 (GridSearchCV)：
+模型： rf
+参数网格： param_grid_rf
+交叉验证折数： 5折 (cv=5)
+评估指标： R²分数 (scoring='r2')
+拟合模型： 使用训练集 X_train_mi 和 y_train 进行训练，以找到最佳参数组合。
+获取最佳模型： best_rf 为经过参数调优后的最佳随机森林回归器。
+7.2 梯度提升回归器 (GradientBoostingRegressor) 的参数搜索
+
+        
+python
+复制代码
+# 定义梯度提升回归模型并进行参数搜索
+gbr = GradientBoostingRegressor(random_state=42)
+param_grid_gbr = {
+    'n_estimators': [50, 100, 200],
+    'learning_rate': [0.01, 0.1, 0.2]
+}
+grid_search_gbr = GridSearchCV(gbr, param_grid_gbr, cv=5, scoring='r2')
+grid_search_gbr.fit(X_train_mi, y_train)
+best_gbr = grid_search_gbr.best_estimator_
+解释：
+梯度提升回归器 (GradientBoostingRegressor)：
+初始化： 创建一个 GradientBoostingRegressor 实例，设置 random_state=42 确保结果可重复。
+定义参数网格 (param_grid_gbr)：
+n_estimators： 树的数量，可以选择50、100或200。
+learning_rate： 学习率，控制每棵树对最终模型的贡献，可以选择0.01、0.1或0.2。
+网格搜索 (GridSearchCV)：
+模型： gbr
+参数网格： param_grid_gbr
+交叉验证折数： 5折 (cv=5)
+评估指标： R²分数 (scoring='r2')
+拟合模型： 使用训练集 X_train_mi 和 y_train 进行训练，以找到最佳参数组合。
+获取最佳模型： best_gbr 为经过参数调优后的最佳梯度提升回归器。
+备注： 通过参数调优，确保基础模型具有最佳的预测性能。
+
+8. 训练基础模型
+
+        
+python
+复制代码
+# 训练基础模型
+best_rf.fit(X_train_mi, y_train)
+best_gbr.fit(X_train_mi, y_train)
+解释：
+训练最佳随机森林回归器 (best_rf)： 使用训练集 X_train_mi 和 y_train 进行训练。
+训练最佳梯度提升回归器 (best_gbr)： 使用训练集 X_train_mi 和 y_train 进行训练。
+备注： 经过参数调优后的基础模型通常具有更好的性能和更高的准确性。
+
+9. 获取基础模型的预测
+
+        
+python
+复制代码
+# 获取基础模型的预测
+rf_train_pred = best_rf.predict(X_train_mi)
+gbr_train_pred = best_gbr.predict(X_train_mi)
+rf_test_pred = best_rf.predict(X_test_mi)
+gbr_test_pred = best_gbr.predict(X_test_mi)
+解释：
+训练集预测：
+rf_train_pred： 使用 best_rf 在训练集 X_train_mi 上进行预测。
+gbr_train_pred： 使用 best_gbr 在训练集 X_train_mi 上进行预测。
+测试集预测：
+rf_test_pred： 使用 best_rf 在测试集 X_test_mi 上进行预测。
+gbr_test_pred： 使用 best_gbr 在测试集 X_test_mi 上进行预测。
+备注： 这些预测结果用于后续的加权结合，以提升整体模型的预测性能。
+
+10. 设置模型权重并计算加权预测
+
+        
+python
+复制代码
+# 设置模型权重
+rf_weight = 0.3
+gbr_weight = 0.7
+
+# 计算加权预测
+y_train_pred_weighted = rf_weight * rf_train_pred + gbr_weight * gbr_train_pred
+y_test_pred_weighted = rf_weight * rf_test_pred + gbr_weight * gbr_test_pred
+解释：
+定义权重：
+rf_weight = 0.3： 随机森林回归器的权重，占30%。
+gbr_weight = 0.7： 梯度提升回归器的权重，占70%。
+计算加权预测：
+y_train_pred_weighted： 在训练集上，将 rf_train_pred 和 gbr_train_pred 按权重加权求和，得到加权后的预测结果。
+y_test_pred_weighted： 在测试集上，将 rf_test_pred 和 gbr_test_pred 按权重加权求和，得到加权后的预测结果。
+备注： 加权平均是一种简单且有效的模型融合方法，可以结合不同模型的优势，提升整体预测性能。
+
+11. 评估模型
+11.1 定义评估函数
+
+        
+python
+复制代码
+# 评估模型
+def evaluate_model(y_true, y_pred):
+    slope, intercept, r_value, p_value, std_err = linregress(y_true, y_pred)
+    r2 = r_value**2
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    return r2, rmse, mae
+解释：
+定义函数 evaluate_model： 计算R²、均方根误差（RMSE）和平均绝对误差（MAE）。
+linregress： 进行线性回归分析，获取斜率、截距以及相关系数 r_value。
+r2： 相关系数的平方，表示模型的解释能力。
+rmse： 均方根误差，衡量预测值与实际值的偏差。
+mae： 平均绝对误差，衡量预测值与实际值的绝对偏差。
+返回值： R²、RMSE和MAE。
+11.2 评估加权模型
+
+        
+python
+复制代码
+# 评估加权模型
+train_r2_weighted, train_rmse_weighted, train_mae_weighted = evaluate_model(y_train, y_train_pred_weighted)
+test_r2_weighted, test_rmse_weighted, test_mae_weighted = evaluate_model(y_test, y_test_pred_weighted)
+
+print(f'Training R2 (Weighted): {train_r2_weighted:.4f}, RMSE: {train_rmse_weighted:.4f}, MAE: {train_mae_weighted:.4f}')
+print(f'Testing R2 (Weighted): {test_r2_weighted:.4f}, RMSE: {test_rmse_weighted:.4f}, MAE: {test_mae_weighted:.4f}')
+解释：
+训练集评估：
+train_r2_weighted： 加权预测在训练集上的R²分数。
+train_rmse_weighted： 加权预测在训练集上的RMSE。
+train_mae_weighted： 加权预测在训练集上的MAE。
+测试集评估：
+test_r2_weighted： 加权预测在测试集上的R²分数。
+test_rmse_weighted： 加权预测在测试集上的RMSE。
+test_mae_weighted： 加权预测在测试集上的MAE。
+打印结果： 输出训练集和测试集的评估指标，方便快速了解模型性能。
+示例输出解释：
+
+        
+复制代码
+Training R2 (Weighted): 0.XXXX, RMSE: 0.XXXX, MAE: 0.XXXX
+Testing R2 (Weighted): 0.XXXX, RMSE: 0.XXXX, MAE: 0.XXXX
+R²： 越接近1表示模型越好地解释了数据的变异性。
+RMSE 和 MAE： 越小表示模型的预测误差越低。
+12. 逆标准化处理
+
+        
+python
+复制代码
+# 逆标准化处理
+y_train_inv = scaler_y.inverse_transform(y_train.reshape(-1, 1)).flatten()
+y_test_inv = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
+y_train_pred_weighted_inv = scaler_y.inverse_transform(y_train_pred_weighted.reshape(-1, 1)).flatten()
+y_test_pred_weighted_inv = scaler_y.inverse_transform(y_test_pred_weighted.reshape(-1, 1)).flatten()
+解释：
+逆标准化： 将标准化后的目标变量和预测结果转换回原始尺度。
+y_train_inv & y_test_inv： 训练集和测试集的实际值逆标准化后的结果。
+y_train_pred_weighted_inv & y_test_pred_weighted_inv： 训练集和测试集的预测值逆标准化后的结果。
+步骤说明：
+reshape(-1, 1)： 将一维数组转换为二维数组，以符合 inverse_transform 的输入要求。
+flatten()： 将二维数组转换回一维数组。
+备注： 逆标准化后的结果更加直观，便于与实际值进行比较和解释。
+
+13. 保存结果到Excel文件
+13.1 保存训练集结果
+
+        
+python
+复制代码
+# 保存结果到Excel文件
+train_results = {
+    'Actual Train': y_train_inv,
+    'Predicted Train (Weighted)': y_train_pred_weighted_inv
+}
+
+train_results_df = pd.DataFrame(train_results)
+train_results_df.to_excel('训练集实际值和预测值.xlsx', index=False)
+解释：
+创建结果字典： 包含训练集的实际值和模型预测值。
+'Actual Train'： 训练集的实际锌含量。
+'Predicted Train (Weighted)'： 加权预测的训练集锌含量。
+转换为DataFrame： 使用 pd.DataFrame 将字典转换为DataFrame格式。
+保存为Excel文件： 将结果保存为 '训练集实际值和预测值.xlsx'，不包含索引。
+13.2 保存测试集结果
+
+        
+python
+复制代码
+test_results = {
+    'Actual Test': y_test_inv,
+    'Predicted Test (Weighted)': y_test_pred_weighted_inv
+}
+
+test_results_df = pd.DataFrame(test_results)
+test_results_df.to_excel('测试集实际值和预测值.xlsx', index=False)
+解释：
+创建结果字典： 包含测试集的实际值和模型预测值。
+'Actual Test'： 测试集的实际锌含量。
+'Predicted Test (Weighted)'： 加权预测的测试集锌含量。
+转换为DataFrame： 使用 pd.DataFrame 将字典转换为DataFrame格式。
+保存为Excel文件： 将结果保存为 '测试集实际值和预测值.xlsx'，不包含索引。
+14. 可视化结果
+14.1 训练集结果可视化
+
+        
+python
+复制代码
+# 可视化结果
+plt.figure(figsize=(10, 5))
+plt.plot(y_train_inv, label='Actual Train')
+plt.plot(y_train_pred_weighted_inv, label='Predicted Train (Weighted)')
+plt.legend()
+plt.title('Training Set: Actual vs Predicted (Weighted)')
+plt.show()
+解释：
+创建图形： 设置图形尺寸为10x5英寸。
+绘制实际值： 使用 plt.plot 绘制训练集的实际锌含量 y_train_inv，标签为 'Actual Train'。
+绘制预测值： 使用 plt.plot 绘制训练集的加权预测锌含量 y_train_pred_weighted_inv，标签为 'Predicted Train (Weighted)'。
+添加图例和标题： 使用 plt.legend() 添加图例，设置图形标题为 'Training Set: Actual vs Predicted (Weighted)'。
+显示图形： 使用 plt.show() 显示图形。
+14.2 测试集结果可视化
+
+        
+python
+复制代码
+plt.figure(figsize=(10, 5))
+plt.plot(y_test_inv, label='Actual Test')
+plt.plot(y_test_pred_weighted_inv, label='Predicted Test (Weighted)')
+plt.legend()
+plt.title('Test Set: Actual vs Predicted (Weighted)')
+plt.show()
+解释：
+创建图形： 设置图形尺寸为10x5英寸。
+绘制实际值： 使用 plt.plot 绘制测试集的实际锌含量 y_test_inv，标签为 'Actual Test'。
+绘制预测值： 使用 plt.plot 绘制测试集的加权预测锌含量 y_test_pred_weighted_inv，标签为 'Predicted Test (Weighted)'。
+添加图例和标题： 使用 plt.legend() 添加图例，设置图形标题为 'Test Set: Actual vs Predicted (Weighted)'。
+显示图形： 使用 plt.show() 显示图形。
+备注： 通过可视化可以直观地比较模型在训练集和测试集上的预测效果，观察预测值与实际值的匹配程度。

@@ -1,0 +1,358 @@
+该脚本的主要目标是通过光谱特征预测土壤有机质（SOM）的含量（SOM(%)），并使用梯度提升回归（Gradient Boosting Regressor, GBR）和多层感知机回归（MLP Regressor）作为基础模型，通过加权平均的方法进行预测。整个过程包括数据读取、特征选择、数据预处理、模型训练与调优、预测、评估以及结果的保存与可视化。
+
+以下是逐步的详细说明：
+
+1. 导入必要的库
+
+        
+python
+复制代码
+import pandas as pd
+import numpy as np
+from sklearn.feature_selection import mutual_info_regression
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import GradientBoostingRegressor
+from sklearn.neural_network import MLPRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import linregress
+import matplotlib.pyplot as plt
+import joblib
+解释：
+Pandas & NumPy： 用于数据处理和数值计算。
+Scikit-learn (sklearn)： 提供特征选择、模型训练、数据分割、标准化、回归模型、模型评估以及超参数调优等功能。
+Scipy： linregress 用于线性回归分析。
+Matplotlib： 用于数据可视化。
+Joblib： 用于模型的保存和加载。
+2. 读取Excel数据文件
+
+        
+python
+复制代码
+# 读取Excel文件
+file_path = '2.SOM光谱特征25.xlsx'
+data = pd.read_excel(file_path)
+解释：
+从路径 '2.SOM光谱特征25.xlsx' 读取Excel文件，并将其存储为Pandas的DataFrame data。该文件包含光谱特征和对应的土壤有机质含量（SOM）数据。
+3. 提取特征与目标变量
+
+        
+python
+复制代码
+# 提取土壤养分数据和光谱数据
+y = data['SOM(%)']
+X = data.drop(columns=['SOM(%)'])
+解释：
+y： 目标变量，表示土壤有机质含量（SOM(%)）。
+X： 特征矩阵，包含所有其他列（假定为光谱特征），通过删除目标列得到。
+4. 使用互信息法进行特征选择
+
+        
+python
+复制代码
+# 互信息法选择特征
+mi = mutual_info_regression(X, y, random_state=42)
+mi_series = pd.Series(mi, index=X.columns, name='互信息值')
+mi_series.to_excel('互信息值.xlsx', index=True)
+
+selected_features_mi = X.columns[mi > 0]
+X_selected_mi = X[selected_features_mi]
+解释：
+互信息回归 (mutual_info_regression)： 测量 X 中每个特征与目标变量 y 之间的依赖性。设置 random_state=42 确保结果可重复。
+存储互信息值： 创建一个Pandas Series mi_series，将互信息值与特征名对应，并保存为Excel文件 '互信息值.xlsx'，便于后续查看。
+特征选择阈值： 选择互信息值大于 0 的特征，存储在 selected_features_mi 中。
+X_selected_mi： 包含通过互信息法选择的特征的特征矩阵。
+备注： 互信息能够捕捉特征与目标变量之间的非线性关系，适用于回归任务中的特征选择。
+
+5. 数据预处理（标准化）
+
+        
+python
+复制代码
+# 数据预处理
+scaler_X = StandardScaler()
+scaler_y = StandardScaler()
+X_scaled_mi = scaler_X.fit_transform(X_selected_mi)
+y_scaled = scaler_y.fit_transform(y.values.reshape(-1, 1)).flatten()
+
+# 保存用于标准化的 scaler_y 对象
+joblib.dump(scaler_y, 'scaler_y.pkl')
+解释：
+标准化： 将特征和目标变量进行标准化处理，移除均值并缩放到单位方差。
+scaler_X： 用于标准化特征矩阵。
+scaler_y： 用于标准化目标变量。
+X_scaled_mi： 通过互信息法选择的特征矩阵进行标准化后的数据。
+y_scaled： 标准化后的目标变量。使用 reshape(-1, 1) 将一维数组转换为二维数组，以符合 StandardScaler 的输入要求，然后通过 flatten() 转回一维数组。
+保存标准化对象： 使用 joblib.dump 将 scaler_y 保存为 'scaler_y.pkl'，以便后续在新数据上进行逆标准化处理。
+备注： 标准化对于一些对特征尺度敏感的模型（如岭回归、支持向量机）至关重要。
+
+6. 分割数据集为训练集和测试集
+
+        
+python
+复制代码
+# 分割数据集
+X_train_mi, X_test_mi, y_train, y_test = train_test_split(X_scaled_mi, y_scaled, test_size=0.2, random_state=42)
+解释：
+train_test_split： 将数据集分割为训练集和测试集。
+test_size=0.2： 保留20%的数据用于测试，80%用于训练。
+random_state=42： 确保分割的可重现性。
+结果：
+X_train_mi & X_test_mi： 训练集和测试集的特征数据，通过互信息法选择的特征。
+y_train & y_test： 训练集和测试集的目标变量。
+7. 定义基础模型并进行参数搜索
+7.1 梯度提升回归器 (GradientBoostingRegressor) 的参数搜索
+
+        
+python
+复制代码
+# 定义基础模型并进行参数搜索
+gbr = GradientBoostingRegressor(random_state=42)
+param_grid_gbr = {
+    'n_estimators': [50, 100, 200],
+    'learning_rate': [0.01, 0.1, 0.2]
+}
+grid_search_gbr = GridSearchCV(gbr, param_grid_gbr, cv=5, scoring='r2')
+grid_search_gbr.fit(X_train_mi, y_train)
+best_gbr = grid_search_gbr.best_estimator_
+解释：
+梯度提升回归器 (GradientBoostingRegressor)：
+初始化： 创建一个 GradientBoostingRegressor 实例，设置 random_state=42 确保结果可重复。
+定义参数网格 (param_grid_gbr)：
+n_estimators： 树的数量，可以选择50、100或200。
+learning_rate： 学习率，控制每棵树对最终结果的贡献，可以选择0.01、0.1或0.2。
+网格搜索 (GridSearchCV)：
+模型： gbr
+参数网格： param_grid_gbr
+交叉验证折数： 5折 (cv=5)
+评估指标： R²分数 (scoring='r2')
+拟合模型： 使用训练集 X_train_mi 和 y_train 进行训练，以找到最佳参数组合。
+获取最佳模型： best_gbr 为经过参数调优后的最佳梯度提升回归器。
+备注： 梯度提升回归器通过逐步构建弱学习器（决策树）来提升模型的预测性能，适用于处理复杂的非线性关系。
+
+7.2 多层感知机回归器 (MLPRegressor) 的参数搜索
+
+        
+python
+复制代码
+# 神经网络模型参数搜索
+mlp = MLPRegressor(random_state=42, max_iter=50000)
+param_grid_mlp = {
+    'hidden_layer_sizes': [(50,), (100,), (50, 50)],
+    'activation': ['relu', 'tanh'],
+    'solver': ['adam', 'lbfgs'],
+    'alpha': [0.0001, 0.001]
+}
+grid_search_mlp = GridSearchCV(mlp, param_grid_mlp, cv=5, scoring='r2')
+grid_search_mlp.fit(X_train_mi, y_train)
+best_mlp = grid_search_mlp.best_estimator_
+解释：
+多层感知机回归器 (MLPRegressor)：
+初始化： 创建一个 MLPRegressor 实例，设置 random_state=42 以确保结果可重复，max_iter=50000 增加最大迭代次数，确保模型能够收敛。
+定义参数网格 (param_grid_mlp)：
+hidden_layer_sizes： 隐藏层的结构，可以选择单隐藏层50个神经元 (50,)、100个神经元 (100,)，或双隐藏层各50个神经元 (50, 50)。
+activation： 激活函数，可以选择'ReLU' ('relu') 或双曲正切函数 ('tanh')。
+solver： 优化算法，可以选择'Adam' ('adam') 或有限内存Broyden-Fletcher-Goldfarb-Shanno算法 ('lbfgs')。
+alpha： L2正则化参数，可以选择0.0001或0.001，控制模型的复杂度，防止过拟合。
+网格搜索 (GridSearchCV)：
+模型： mlp
+参数网格： param_grid_mlp
+交叉验证折数： 5折 (cv=5)
+评估指标： R²分数 (scoring='r2')
+拟合模型： 使用训练集 X_train_mi 和 y_train 进行训练，以找到最佳参数组合。
+获取最佳模型： best_mlp 为经过参数调优后的最佳多层感知机回归器。
+备注： 多层感知机回归器是一种前馈神经网络，适用于捕捉复杂的非线性关系，具有较强的建模能力。
+
+8. 训练基础模型
+
+        
+python
+复制代码
+# 训练基础模型
+best_gbr.fit(X_train_mi, y_train)
+best_mlp.fit(X_train_mi, y_train)
+解释：
+训练最佳梯度提升回归器： 使用训练集 X_train_mi 和 y_train 进行训练。
+训练最佳多层感知机回归器： 使用训练集 X_train_mi 和 y_train 进行训练。
+备注： 经过参数调优后的基础模型通常具有更好的性能和更高的准确性。
+
+9. 获取基础模型的预测
+
+        
+python
+复制代码
+# 获取基础模型的预测
+gbr_train_pred = best_gbr.predict(X_train_mi)
+mlp_train_pred = best_mlp.predict(X_train_mi)
+gbr_test_pred = best_gbr.predict(X_test_mi)
+mlp_test_pred = best_mlp.predict(X_test_mi)
+解释：
+训练集预测：
+gbr_train_pred： 使用 best_gbr 在训练集 X_train_mi 上进行预测。
+mlp_train_pred： 使用 best_mlp 在训练集 X_train_mi 上进行预测。
+测试集预测：
+gbr_test_pred： 使用 best_gbr 在测试集 X_test_mi 上进行预测。
+mlp_test_pred： 使用 best_mlp 在测试集 X_test_mi 上进行预测。
+备注： 这些预测结果用于后续的加权结合，以提升整体模型的预测性能。
+
+10. 设置模型权重并计算加权预测
+
+        
+python
+复制代码
+# 设置模型权重
+gbr_weight = 0.7
+mlp_weight = 0.3
+
+# 计算加权预测
+y_train_pred_weighted = gbr_weight * gbr_train_pred + mlp_weight * mlp_train_pred
+y_test_pred_weighted = gbr_weight * gbr_test_pred + mlp_weight * mlp_test_pred
+解释：
+定义权重：
+gbr_weight = 0.7： 梯度提升回归器的权重，占70%。
+mlp_weight = 0.3： 多层感知机回归器的权重，占30%。
+计算加权预测：
+y_train_pred_weighted： 在训练集上，将 gbr_train_pred 和 mlp_train_pred 按权重加权求和，得到加权后的预测结果。
+y_test_pred_weighted： 在测试集上，将 gbr_test_pred 和 mlp_test_pred 按权重加权求和，得到加权后的预测结果。
+备注： 加权平均是一种简单且有效的模型融合方法，可以结合不同模型的优势，提升整体预测性能。
+
+11. 评估模型
+11.1 定义评估函数
+
+        
+python
+复制代码
+# 评估模型
+def evaluate_model(y_true, y_pred):
+    slope, intercept, r_value, p_value, std_err = linregress(y_true, y_pred)
+    r2 = r_value**2
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    return r2, rmse, mae
+解释：
+定义函数 evaluate_model： 计算R²、均方根误差（RMSE）和平均绝对误差（MAE）。
+linregress： 进行线性回归分析，获取斜率、截距以及相关系数 r_value。
+r2： 相关系数的平方，表示模型的解释能力。
+rmse： 均方根误差，衡量预测值与实际值的偏差。
+mae： 平均绝对误差，衡量预测值与实际值的绝对偏差。
+返回值： R²、RMSE和MAE。
+11.2 评估加权模型
+
+        
+python
+复制代码
+# 评估加权模型
+train_r2_weighted, train_rmse_weighted, train_mae_weighted = evaluate_model(y_train, y_train_pred_weighted)
+test_r2_weighted, test_rmse_weighted, test_mae_weighted = evaluate_model(y_test, y_test_pred_weighted)
+
+print(f'Training R2 (Weighted): {train_r2_weighted:.4f}, RMSE: {train_rmse_weighted:.4f}, MAE: {train_mae_weighted:.4f}')
+print(f'Testing R2 (Weighted): {test_r2_weighted:.4f}, RMSE: {test_rmse_weighted:.4f}, MAE: {test_mae_weighted:.4f}')
+解释：
+训练集评估：
+train_r2_weighted： 加权预测在训练集上的R²分数。
+train_rmse_weighted： 加权预测在训练集上的RMSE。
+train_mae_weighted： 加权预测在训练集上的MAE。
+测试集评估：
+test_r2_weighted： 加权预测在测试集上的R²分数。
+test_rmse_weighted： 加权预测在测试集上的RMSE。
+test_mae_weighted： 加权预测在测试集上的MAE。
+打印结果： 输出训练集和测试集的评估指标，方便快速了解模型性能。
+示例输出解释：
+
+        
+复制代码
+Training R2 (Weighted): 0.XXXX, RMSE: 0.XXXX, MAE: 0.XXXX
+Testing R2 (Weighted): 0.XXXX, RMSE: 0.XXXX, MAE: 0.XXXX
+R²： 越接近1表示模型越好地解释了数据的变异性。
+RMSE 和 MAE： 越小表示模型的预测误差越低。
+12. 逆标准化处理
+
+        
+python
+复制代码
+# 逆标准化处理
+y_train_inv = scaler_y.inverse_transform(y_train.reshape(-1, 1)).flatten()
+y_test_inv = scaler_y.inverse_transform(y_test.reshape(-1, 1)).flatten()
+y_train_pred_weighted_inv = scaler_y.inverse_transform(y_train_pred_weighted.reshape(-1, 1)).flatten()
+y_test_pred_weighted_inv = scaler_y.inverse_transform(y_test_pred_weighted.reshape(-1, 1)).flatten()
+解释：
+逆标准化： 将标准化后的目标变量和预测结果转换回原始尺度。
+y_train_inv & y_test_inv： 训练集和测试集的实际值逆标准化后的结果。
+y_train_pred_weighted_inv & y_test_pred_weighted_inv： 训练集和测试集的预测值逆标准化后的结果。
+步骤说明：
+reshape(-1, 1)： 将一维数组转换为二维数组，以符合 inverse_transform 的输入要求。
+flatten()： 将二维数组转换回一维数组。
+备注： 逆标准化后的结果更加直观，便于与实际值进行比较和解释。
+
+13. 保存结果到Excel文件
+13.1 保存训练集结果
+
+        
+python
+复制代码
+# 保存结果到Excel文件
+train_results = {
+    'Actual Train': y_train_inv,
+    'Predicted Train (Weighted)': y_train_pred_weighted_inv
+}
+
+train_results_df = pd.DataFrame(train_results)
+train_results_df.to_excel('训练集实际值和预测值.xlsx', index=False)
+解释：
+创建结果字典： 包含训练集的实际值和模型预测值。
+'Actual Train'： 训练集的实际含盐量。
+'Predicted Train (Weighted)'： 加权预测的训练集含盐量。
+转换为DataFrame： 使用 pd.DataFrame 将字典转换为DataFrame格式。
+保存为Excel文件： 将结果保存为 '训练集实际值和预测值.xlsx'，不包含索引。
+13.2 保存测试集结果
+
+        
+python
+复制代码
+test_results = {
+    'Actual Test': y_test_inv,
+    'Predicted Test (Weighted)': y_test_pred_weighted_inv
+}
+
+test_results_df = pd.DataFrame(test_results)
+test_results_df.to_excel('测试集实际值和预测值.xlsx', index=False)
+解释：
+创建结果字典： 包含测试集的实际值和模型预测值。
+'Actual Test'： 测试集的实际含盐量。
+'Predicted Test (Weighted)'： 加权预测的测试集含盐量。
+转换为DataFrame： 使用 pd.DataFrame 将字典转换为DataFrame格式。
+保存为Excel文件： 将结果保存为 '测试集实际值和预测值.xlsx'，不包含索引。
+备注： 这样可以方便地在Excel中查看和比较实际值与预测值。
+
+14. 可视化结果
+
+        
+python
+复制代码
+# 可视化结果
+plt.figure(figsize=(10, 5))
+plt.plot(y_train_inv, label='Actual Train')
+plt.plot(y_train_pred_weighted_inv, label='Predicted Train (Weighted)')
+plt.legend()
+plt.title('Training Set: Actual vs Predicted (Weighted)')
+plt.show()
+
+plt.figure(figsize=(10, 5))
+plt.plot(y_test_inv, label='Actual Test')
+plt.plot(y_test_pred_weighted_inv, label='Predicted Test (Weighted)')
+plt.legend()
+plt.title('Test Set: Actual vs Predicted (Weighted)')
+plt.show()
+解释：
+训练集可视化：
+创建图形： 尺寸为10x5英寸。
+绘制实际值与预测值： 使用 plt.plot 绘制训练集的实际含盐量和加权预测含盐量。
+添加图例与标题： plt.legend() 添加图例，plt.title() 设置标题。
+显示图形： 使用 plt.show() 展示图形。
+测试集可视化：
+创建图形： 尺寸为10x5英寸。
+绘制实际值与预测值： 使用 plt.plot 绘制测试集的实际含盐量和加权预测含盐量。
+添加图例与标题： plt.legend() 添加图例，plt.title() 设置标题。
+显示图形： 使用 plt.show() 展示图形。
+备注： 通过可视化可以直观地比较模型在训练集和测试集上的预测效果，观察预测值与实际值的匹配程度。

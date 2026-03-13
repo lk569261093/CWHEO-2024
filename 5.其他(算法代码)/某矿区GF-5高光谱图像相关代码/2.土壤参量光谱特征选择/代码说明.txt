@@ -1,0 +1,203 @@
+该脚本的主要功能是从一个包含养分含量和反射率数据的Excel文件中，针对锌（Zn）和土壤有机质（SOM）两个目标变量进行特征选择。脚本使用随机森林回归器结合差分进化算法来优化特征选择，并将选定的特征保存到新的Excel文件中。以下是对脚本各部分的详细解析：
+1. 导入必要的库
+
+
+import pandas as pd
+import numpy as np
+from sklearn.ensemble import RandomForestRegressor
+from scipy.optimize import differential_evolution
+from openpyxl import Workbook
+from tqdm import tqdm
+import time
+pandas (pd)：用于数据操作和分析，特别是读取和处理Excel文件。
+numpy (np)：用于数值运算和处理数组数据。
+RandomForestRegressor 来自 scikit-learn：用于构建回归模型以评估特征的重要性。
+differential_evolution 来自 scipy.optimize：用于执行优化以选择特征。
+openpyxl：用于创建和写入Excel工作簿。
+tqdm：用于在处理过程中显示进度条，提高用户体验。
+time：用于跟踪脚本的执行时间，帮助评估性能。
+2. 读取Excel数据
+
+
+def read_excel_data(file_name):
+    df = pd.read_excel(file_name)
+    df = df.dropna()
+    return df
+功能：从指定的Excel文件中读取数据，并删除包含缺失值的行，以确保数据的完整性。
+参数：
+file_name：要读取的Excel文件的路径和名称。
+过程：
+读取数据：使用 pd.read_excel 将Excel文件加载到pandas的DataFrame中。
+删除缺失值：df.dropna() 方法删除任何包含 NaN 值的行。
+返回值：一个已清理且不包含缺失值的DataFrame。
+3. 特征选择
+
+        
+
+def feature_selection(df, target_col, n_features=25):
+    X = df.iloc[:, 3:].values  # 修改为从第4列开始取特征
+    y = df[target_col].values
+
+    rf = RandomForestRegressor(n_estimators=100, random_state=42)
+
+    def objective_function(weights):
+        selected_features = X[:, weights > 0.5]
+        rf.fit(selected_features, y)
+        feature_importances = rf.feature_importances_
+        return -np.sum(feature_importances)
+
+    bounds = [(0, 1)] * len(df.columns[3:])  # 修改为从第4列开始计算特征数量
+
+    result = differential_evolution(objective_function, bounds, maxiter=100, seed=42)
+    best_weights = (result.x > 0.5)
+
+    rf.fit(X[:, best_weights], y)
+    feature_importances = rf.feature_importances_
+    top_n_features = np.argsort(feature_importances)[-n_features:]
+    return df.columns[3:][best_weights][top_n_features]  # 修改为从第4列开始取特征名称
+功能：针对指定的目标变量，使用随机森林回归器结合差分进化算法进行特征选择，最终选择前N个最重要的特征。
+参数：
+df：包含数据集的DataFrame。
+target_col：目标列的名称，即要进行特征选择的目标变量（如Zn或SOM）。
+n_features：要选择的前N个特征数量（默认值为25）。
+过程：
+特征和目标变量分离：
+X：提取所有特征列，从第4列开始（假设前三列为非特征数据，如ID、日期等），使用 df.iloc[:, 3:].values 转换为NumPy数组。
+y：提取目标变量的值，使用 df[target_col].values。
+随机森林模型初始化：
+创建一个 RandomForestRegressor 实例，设置树的数量为100棵（n_estimators=100）和固定的随机种子（random_state=42）以确保结果的可重复性。
+定义目标函数：
+功能：评估一组特征的总重要性，并将其作为优化的目标。
+输入：一个权重向量，每个权重对应一个特征。权重大于0.5的特征被选中。
+过程：
+特征选择：使用布尔索引 weights > 0.5 选择权重大于0.5的特征。
+模型训练：在选定的特征上训练随机森林回归器。
+重要性计算：获取训练后的特征重要性。
+返回值：特征重要性之和的负值，因为 differential_evolution 是用于最小化目标函数的。
+定义优化的边界：
+bounds = [(0, 1)] * len(df.columns[3:])：为每个从第4列开始的特征定义权重的范围为0到1。
+执行差分进化优化：
+调用 differential_evolution 函数，传入目标函数 objective_function 和定义的 bounds。
+设置最大迭代次数 maxiter=100 和随机种子 seed=42。
+结果：优化器返回的最佳权重向量 result.x。
+确定最佳特征：
+阈值处理：将最佳权重转换为布尔掩码 best_weights = (result.x > 0.5)，选择权重大于0.5的特征。
+模型训练：在选定的特征上重新训练随机森林回归器。
+获取特征重要性：feature_importances = rf.feature_importances_。
+选择前N个特征：使用 np.argsort 对特征重要性进行排序，选择前 n_features 个特征的索引。
+返回值：返回对应的特征名称，使用 df.columns[3:][best_weights][top_n_features]。
+返回值：一个包含前N个选定特征名称的列表。
+4. 将选定特征保存到Excel
+
+        
+
+def save_selected_features_to_excel(file_name, df, target_col, selected_features):
+    wb = Workbook()
+    ws = wb.active
+
+    # 写入目标列
+    ws.cell(row=1, column=1, value=target_col)
+    for i, value in enumerate(df[target_col].values):
+        ws.cell(row=i+2, column=1, value=value)
+
+    # 写入选择的特征
+    for j, feature in enumerate(selected_features):
+        ws.cell(row=1, column=j+2, value=feature)
+        for i, value in enumerate(df[feature].values):
+            ws.cell(row=i+2, column=j+2, value=value)
+
+    wb.save(file_name)
+功能：将目标列和选定的特征列保存到一个新的Excel文件中，以便后续分析或使用。
+参数：
+file_name：要保存的Excel文件的名称或路径。
+df：包含原始数据的DataFrame。
+target_col：目标列的名称（如Zn或SOM）。
+selected_features：选定的特征名称列表。
+过程：
+创建工作簿和工作表：
+使用 Workbook() 创建一个新的Excel工作簿。
+访问活动的工作表 ws = wb.active。
+写入目标列：
+将目标列的名称写入第一行第一个单元格 ws.cell(row=1, column=1, value=target_col)。
+遍历目标列的每个值，通过 enumerate 获取索引 i 和对应的 value，并从第二行开始依次写入目标变量的值。
+写入选定的特征：
+遍历每个选定的特征，通过 enumerate 获取特征的索引 j 和名称 feature。
+将特征名称写入第一行第 j+2 列的单元格 ws.cell(row=1, column=j+2, value=feature)。
+遍历该特征的每个值，通过 enumerate 获取索引 i 和对应的 value，并从第二行开始依次写入特征值。
+保存工作簿：
+使用 wb.save(file_name) 将工作簿保存到指定的文件名。
+5. 主函数
+
+
+def main(input_file_name):
+    start_time = time.time()
+    df = read_excel_data(input_file_name)
+    nutrients = ['Zn(mg/kg)', 'SOM(%)']
+    output_files = ['2.Zn光谱特征25.xlsx', '2.SOM光谱特征25.xlsx']
+
+    for nutrient, output_file in zip(tqdm(nutrients, desc='Feature Selection Progress'), output_files):
+        selected_features = feature_selection(df, nutrient)
+        save_selected_features_to_excel(output_file, df, nutrient, selected_features)
+
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    hours, rem = divmod(elapsed_time, 3600)
+    minutes, seconds = divmod(rem, 60)
+    print(f"程序运行时间：{int(hours):02}:{int(minutes):02}:{seconds:.2f}")
+功能：协调整个工作流程，包括读取数据、对指定的目标变量进行特征选择、保存结果，并报告执行时间。
+参数：
+input_file_name：包含数据集的输入Excel文件的名称或路径。
+过程：
+记录开始时间：使用 start_time = time.time() 记录当前时间，以便后续计算总执行时间。
+读取数据：调用 read_excel_data(input_file_name) 函数加载并清理数据集。
+定义目标变量和输出文件：
+nutrients：目标列的列表，此处为 'Zn(mg/kg)' 和 'SOM(%)'。
+output_files：对应的输出Excel文件名，用于保存每个目标变量的选定特征（如 '2.Zn光谱特征25.xlsx' 和 '2.SOM光谱特征25.xlsx'）。
+特征选择和保存：
+使用 zip 和 tqdm 迭代目标变量和对应的输出文件，tqdm 提供带有 'Feature Selection Progress' 标题的进度条，提升用户体验。
+对于每对 nutrient 和 output_file：
+调用 feature_selection(df, nutrient) 获取前25个选定的特征。
+调用 save_selected_features_to_excel(output_file, df, nutrient, selected_features) 将选定的特征和目标变量保存到指定的Excel文件。
+记录结束时间：使用 end_time = time.time() 记录当前时间。
+计算并显示执行时间：
+计算总共耗时 elapsed_time = end_time - start_time。
+使用 divmod 将总耗时转换为小时、分钟和秒。
+使用 print 输出执行时间，格式为 程序运行时间：HH:MM:SS.SS。
+示例输出：
+
+        
+复制代码
+程序运行时间：00:05:30.25
+表示程序运行了0小时5分钟30.25秒。
+6. 执行入口
+
+        
+
+if __name__ == '__main__':
+    input_file_name = '养分含量与反射率.xlsx'
+    main(input_file_name)
+功能：指定脚本直接执行时的入口点，确保只有在脚本作为主程序运行时才会执行 main 函数。
+过程：
+将 input_file_name 设置为 '养分含量与反射率.xlsx'，即包含养分含量和对应反射率数据的Excel文件。
+调用 main(input_file_name) 开始执行整个流程。
+
+7. 总结
+该脚本的主要功能和流程如下：
+
+读取数据：
+
+从指定的Excel文件 养分含量与反射率.xlsx 中加载数据。
+删除任何包含缺失值的行，确保数据的完整性和可靠性。
+特征选择：
+
+对于每个目标变量（锌含量 Zn(mg/kg) 和土壤有机质含量 SOM(%)），使用随机森林回归器评估各个特征的重要性。
+通过差分进化算法优化特征选择，寻找能够最大化特征重要性总和的特征组合。
+最终选择前25个最重要的特征，并记录其名称。
+保存结果：
+
+将每个目标变量对应的25个选定特征及其数据保存到新的Excel文件中，例如 2.Zn光谱特征25.xlsx 和 2.SOM光谱特征25.xlsx。
+每个输出文件包含目标变量的值和选定特征的值，便于后续分析或建模。
+报告执行时间：
+
+记录并输出整个流程的总执行时间，帮助评估脚本的性能和效率。
+通过这种方法，您可以从大量的光谱特征中筛选出对目标养分含量（如Zn和SOM）具有显著影响的关键特征，从而简化后续的数据分析和模型构建过程，提高模型的性能和解释性。
